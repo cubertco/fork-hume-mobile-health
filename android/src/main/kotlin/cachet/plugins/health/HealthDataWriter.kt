@@ -663,6 +663,22 @@ class HealthDataWriter(
                             zoneOffset = null,
                             metadata = metadata,
                     )
+            SKIN_TEMPERATURE ->
+                    SkinTemperatureRecord(
+                            startTime = Instant.ofEpochMilli(startTime),
+                            endTime = Instant.ofEpochMilli(endTime),
+                            startZoneOffset = null,
+                            endZoneOffset = null,
+                            baseline = Temperature.celsius(value),
+                            measurementLocation = SkinTemperatureRecord.MEASUREMENT_LOCATION_UNKNOWN,
+                            deltas = listOf(
+                                    SkinTemperatureRecord.Delta(
+                                            time = Instant.ofEpochMilli(startTime),
+                                            delta = TemperatureDelta.celsius(0.0),
+                                    )
+                            ),
+                            metadata = metadata,
+                    )
             BODY_WATER_MASS ->
                     BodyWaterMassRecord(
                             time = Instant.ofEpochMilli(startTime),
@@ -907,6 +923,7 @@ class HealthDataWriter(
         private const val ACTIVE_ENERGY_BURNED = "ACTIVE_ENERGY_BURNED"
         private const val HEART_RATE = "HEART_RATE"
         private const val BODY_TEMPERATURE = "BODY_TEMPERATURE"
+        private const val SKIN_TEMPERATURE = "SKIN_TEMPERATURE"
         private const val BODY_WATER_MASS = "BODY_WATER_MASS"
         private const val BLOOD_OXYGEN = "BLOOD_OXYGEN"
         private const val BLOOD_GLUCOSE = "BLOOD_GLUCOSE"

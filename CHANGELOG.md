@@ -1,3 +1,9 @@
+## 13.3.1
+
+* iOS: Fix issues with app crashing on iOS 15
+* iOS: Add support for `AppleSleepingWristTemperature` - PR [#468](https://github.com/carp-dk/carp-health-flutter/pull/468)
+* Android: Add support for `SkinTemperatureRecord` (READ/WRITE)
+
 ## 13.3.0
 
 * Add support for `WORKOUT_ROUTE` - PR [#454](https://github.com/carp-dk/carp-health-flutter/pull/454)

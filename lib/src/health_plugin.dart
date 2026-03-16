@@ -72,6 +72,19 @@ class Health {
   bool isDataTypeAvailable(HealthDataType dataType) =>
       Platform.isAndroid ? dataTypeKeysAndroid.contains(dataType) : dataTypeKeysIOS.contains(dataType);
 
+  /// Check if a given data type is available on this device.
+  /// Currently only needed for Android Skin Temperature support.
+  Future<void> _checkIfDataTypeAvailableOnDevice(HealthDataType dataType) async {
+    if (!Platform.isAndroid) return;
+
+    if (dataType == HealthDataType.SKIN_TEMPERATURE) {
+      final available = await isSkinTemperatureAvailable();
+      if (!available) {
+        throw HealthException(dataType, 'Not available on this Android device');
+      }
+    }
+  }
+
   /// Determines if the health data [types] have been granted with the specified
   /// access rights [permissions].
   ///
@@ -308,6 +321,26 @@ class Health {
     }
   }
 
+  /// Checks whether Skin Temperature is available on this Android device.
+  ///
+  /// Android only. Returns false on iOS or if an error occurs.
+  Future<bool> isSkinTemperatureAvailable() async {
+    if (Platform.isIOS) return false;
+
+    try {
+      final status = await getHealthConnectSdkStatus();
+      if (status != HealthConnectSdkStatus.sdkAvailable) {
+        return false;
+      }
+
+      final available = await _channel.invokeMethod<bool>('isSkinTemperatureAvailable');
+      return available ?? false;
+    } catch (e) {
+      debugPrint('$runtimeType - Exception in isSkinTemperatureAvailable(): $e');
+      return false;
+    }
+  }
+
   /// Requests permissions to access health data [types].
   ///
   /// Returns true if successful, false otherwise.
@@ -402,6 +435,27 @@ class Health {
     }
   }
 
+  List<HealthDataType> _normalizeTypesForChanges(List<HealthDataType> types) {
+    final normalized = List<HealthDataType>.from(types, growable: true);
+
+    final bmiIndex = normalized.indexOf(HealthDataType.BODY_MASS_INDEX);
+    if (bmiIndex != -1) {
+      normalized.removeAt(bmiIndex);
+      if (!normalized.contains(HealthDataType.WEIGHT)) {
+        normalized.add(HealthDataType.WEIGHT);
+      }
+      if (!normalized.contains(HealthDataType.HEIGHT)) {
+        normalized.add(HealthDataType.HEIGHT);
+      }
+    }
+
+    if (normalized.contains(HealthDataType.WORKOUT_ROUTE) && !normalized.contains(HealthDataType.WORKOUT)) {
+      normalized.add(HealthDataType.WORKOUT);
+    }
+
+    return normalized.toSet().toList();
+  }
+
   /// Calculate the BMI using the last observed height and weight values.
   Future<List<HealthDataPoint>> _computeAndroidBMI(
     DateTime startTime,
@@ -483,6 +537,7 @@ class Health {
     RecordingMethod recordingMethod = RecordingMethod.automatic,
   }) async {
     await _checkIfHealthConnectAvailableOnAndroid();
+    await _checkIfDataTypeAvailableOnDevice(type);
     if (Platform.isIOS && [RecordingMethod.active, RecordingMethod.unknown].contains(recordingMethod)) {
       throw ArgumentError("recordingMethod must be manual or automatic on iOS");
     }
@@ -1068,6 +1123,7 @@ class Health {
         : (await _deviceInfo.iosInfo).identifierForVendor;
 
     // If not implemented on platform, throw an exception
+    await _checkIfDataTypeAvailableOnDevice(type);
     if (!isDataTypeAvailable(type)) {
       throw HealthException(type, 'Not available on platform $platformType');
     }
@@ -1149,6 +1205,69 @@ class Health {
     return removeDuplicates(dataPoints);
   }
 
+  /// Create a Health Connect changes token for the provided [types].
+  ///
+  /// Android only. Returns null on iOS or if an error occurs.
+  Future<String?> getChangesToken({required List<HealthDataType> types}) async {
+    if (Platform.isIOS) return null;
+
+    await _checkIfHealthConnectAvailableOnAndroid();
+    if (types.isEmpty) {
+      throw ArgumentError('The list of [types] must not be empty.');
+    }
+
+    final normalizedTypes = _normalizeTypesForChanges(types);
+    if (normalizedTypes.isEmpty) {
+      throw ArgumentError('No supported types supplied for change token creation.');
+    }
+
+    for (final type in normalizedTypes) {
+      await _checkIfDataTypeAvailableOnDevice(type);
+      if (!isDataTypeAvailable(type)) {
+        throw HealthException(type, 'Not available on platform $platformType');
+      }
+    }
+
+    try {
+      return await _channel.invokeMethod<String>('getChangesToken', {
+        'types': normalizedTypes.map((type) => type.name).toList(),
+      });
+    } catch (e) {
+      debugPrint('$runtimeType - Exception in getChangesToken(): $e');
+      return null;
+    }
+  }
+
+  /// Fetch the next page of changes for a previously created token.
+  ///
+  /// Android only. Returns null on iOS or if an error occurs.
+  Future<HealthChangesResponse?> getChanges({
+    required String changesToken,
+    bool includeSelf = false,
+  }) async {
+    if (Platform.isIOS) return null;
+
+    await _checkIfHealthConnectAvailableOnAndroid();
+    if (changesToken.isEmpty) {
+      throw ArgumentError('The [changesToken] must not be empty.');
+    }
+
+    try {
+      final response = await _channel.invokeMethod('getChanges', {
+        'changesToken': changesToken,
+        'includeSelf': includeSelf,
+      });
+
+      if (response is Map) {
+        return HealthChangesResponse.fromMethodChannel(response);
+      }
+      return null;
+    } catch (e) {
+      debugPrint('$runtimeType - Exception in getChanges(): $e');
+      return null;
+    }
+  }
+
   /// Prepares an interval query, i.e. checks if the types are available, etc.
   Future<List<HealthDataPoint>> _prepareQuery(
     DateTime startTime,
@@ -1163,6 +1282,7 @@ class Health {
         : (await _deviceInfo.iosInfo).identifierForVendor;
 
     // If not implemented on platform, throw an exception
+    await _checkIfDataTypeAvailableOnDevice(dataType);
     if (!isDataTypeAvailable(dataType)) {
       throw HealthException(dataType, 'Not available on platform $platformType');
     }
@@ -1188,6 +1308,7 @@ class Health {
         : (await _deviceInfo.iosInfo).identifierForVendor;
 
     // If not implemented on platform, throw an exception
+    await _checkIfDataTypeAvailableOnDevice(dataType);
     if (!isDataTypeAvailable(dataType)) {
       throw HealthException(dataType, 'Not available on platform $platformType');
     }
@@ -1210,6 +1331,7 @@ class Health {
 
     for (var type in dataTypes) {
       // If not implemented on platform, throw an exception
+      await _checkIfDataTypeAvailableOnDevice(type);
       if (!isDataTypeAvailable(type)) {
         throw HealthException(type, 'Not available on platform $platformType');
       }
