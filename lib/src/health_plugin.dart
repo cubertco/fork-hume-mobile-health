@@ -343,7 +343,8 @@ class Health {
 
   /// Requests permissions to access health data [types].
   ///
-  /// Returns true if successful, false otherwise.
+  /// Returns whether authorization was **granted** in the platform-specific sense
+  /// (see caveats, especially on iOS).
   ///
   /// Parameters:
   ///
@@ -357,10 +358,16 @@ class Health {
   ///
   ///  * This method may block if permissions are already granted. Hence, check
   ///    [hasPermissions] before calling this method.
-  ///  * As Apple HealthKit will not disclose if READ access has been granted for
-  ///    a data type due to privacy concern, this method will return **true if
-  ///    the window asking for permission was showed to the user without errors**
-  ///    if it is called on iOS with a READ or READ_WRITE access.
+  ///  * **iOS - read access:** Apple HealthKit does not disclose whether read access
+  ///    was granted. [hasPermissions] may return `null` for READ / READ_WRITE checks.
+  ///  * **iOS - this method's return value:**
+  ///    + If the request includes **any write (share)** types, returns `true` only when
+  ///      **sharing** is authorized for **all** requested write types after the system UI
+  ///      completes.
+  ///    + If the request is **read-only** (no write types), returns HealthKit's completion
+  ///      `success` (the authorization request finished); that still does **not** mean
+  ///      read access was granted.
+  ///  * **Android:** unchanged; reflects Health Connect permission outcome as before.
   Future<bool> requestAuthorization(List<HealthDataType> types, {List<HealthDataAccess>? permissions}) async {
     await _checkIfHealthConnectAvailableOnAndroid();
     if (permissions != null && permissions.length != types.length) {

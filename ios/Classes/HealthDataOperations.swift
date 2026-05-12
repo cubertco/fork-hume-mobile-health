@@ -177,10 +177,30 @@ class HealthDataOperations {
             }
         }
 
-        healthStore.requestAuthorization(toShare: typesToWrite, read: typesToRead) {
-            success, _ in
-            DispatchQueue.main.async {
-                result(success)
+        healthStore.requestAuthorization(toShare: typesToWrite, read: typesToRead) { [self] success, error in
+            DispatchQueue.main.async { [self] in
+                if error != nil {
+                    result(false)
+                    return
+                }
+                if !success {
+                    result(false)
+                    return
+                }
+                // Read-only: Apple does not expose read grant; keep returning completion `success`
+                // (same coarse signal as before for callers that only request read).
+                if typesToWrite.isEmpty {
+                    result(success)
+                    return
+                }
+                for sampleType in typesToWrite {
+                    let status = self.healthStore.authorizationStatus(for: sampleType)
+                    if status != HKAuthorizationStatus.sharingAuthorized {
+                        result(false)
+                        return
+                    }
+                }
+                result(true)
             }
         }
     }
