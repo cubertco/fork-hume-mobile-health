@@ -1,3 +1,7 @@
+## 13.3.2
+
+* iOS **BREAKING**: `requestAuthorization` now returns `true` for requests containing write/share sample types only when every requested write type is `.sharingAuthorized` after the HealthKit sheet. Previously the native layer forwarded HealthKit's completion `success`, which means the authorization request completed, not that the user granted access. Read-only requests still return the HealthKit completion flag because Apple does not disclose read authorization status.
+
 ## 13.3.1
 
 * iOS: Fix issues with app crashing on iOS 15
