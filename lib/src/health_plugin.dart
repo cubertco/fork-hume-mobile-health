@@ -646,6 +646,56 @@ class Health {
     return success ?? false;
   }
 
+  /// Writes one Health Connect `SleepSessionRecord` containing multiple sleep
+  /// [stages] (a hypnogram).
+  ///
+  /// Use this instead of multiple [writeHealthData] calls so Health Connect (and
+  /// downstream readers like Samsung Health) sees a single session with granular
+  /// awake/light/deep/REM stages rather than separate generic sleeping blocks.
+  ///
+  /// This API is Android only.
+  Future<bool> writeSleepSessionData({
+    required DateTime startTime,
+    required DateTime endTime,
+    required List<HealthSleepSessionStage> stages,
+    RecordingMethod recordingMethod = RecordingMethod.automatic,
+    String? clientRecordId,
+    double? clientRecordVersion,
+  }) async {
+    if (!Platform.isAndroid) {
+      throw UnsupportedError('writeSleepSessionData is only available on Android');
+    }
+
+    await _checkIfHealthConnectAvailableOnAndroid();
+
+    if (startTime.isAfter(endTime)) {
+      throw ArgumentError("startTime must be equal or earlier than endTime");
+    }
+    if (stages.isEmpty) {
+      throw ArgumentError("stages must not be empty");
+    }
+    for (final stage in stages) {
+      if (stage.startTime.isBefore(startTime) || stage.endTime.isAfter(endTime)) {
+        throw ArgumentError("each stage must be within the session range");
+      }
+      if (stage.startTime.isAfter(stage.endTime)) {
+        throw ArgumentError("stage startTime must be equal or earlier than its endTime");
+      }
+    }
+
+    Map<String, dynamic> args = {
+      'startTime': startTime.millisecondsSinceEpoch,
+      'endTime': endTime.millisecondsSinceEpoch,
+      'stages': stages.map((stage) => stage.toJson()).toList(),
+      'recordingMethod': recordingMethod.toInt(),
+      'clientRecordId': clientRecordId,
+      'clientRecordVersion': clientRecordVersion,
+    };
+
+    final bool? success = await _channel.invokeMethod('writeSleepSessionData', args);
+    return success ?? false;
+  }
+
   /// Deletes all records of the given [type] for a given period of time.
   ///
   /// Returns true if successful, false otherwise.
@@ -1775,6 +1825,31 @@ class Health {
       HealthWorkoutActivityType.OTHER,
     }.contains(type);
   }
+}
+
+/// A single sleep stage within a sleep session hypnogram.
+///
+/// Used by [Health.writeSleepSessionData] to build one Health Connect
+/// `SleepSessionRecord` with multiple stages. [type] must be one of the sleep
+/// stage [HealthDataType]s (e.g. [HealthDataType.SLEEP_LIGHT],
+/// [HealthDataType.SLEEP_DEEP], [HealthDataType.SLEEP_REM],
+/// [HealthDataType.SLEEP_AWAKE]).
+class HealthSleepSessionStage {
+  const HealthSleepSessionStage({
+    required this.type,
+    required this.startTime,
+    required this.endTime,
+  });
+
+  final HealthDataType type;
+  final DateTime startTime;
+  final DateTime endTime;
+
+  Map<String, dynamic> toJson() => {
+        'dataTypeKey': type.name,
+        'startTime': startTime.millisecondsSinceEpoch,
+        'endTime': endTime.millisecondsSinceEpoch,
+      };
 }
 
 Map<String, dynamic> _serializeWorkoutRouteLocationForNative(WorkoutRouteLocation location) {
