@@ -547,6 +547,38 @@ class HealthAppState extends State<HealthApp> {
         endTime: now,
         recordingMethod: RecordingMethod.manual,
       );
+
+      // One sleep session with a multi-stage hypnogram (awake/light/deep/REM).
+      // This is the correct shape for Health Connect so readers like Samsung
+      // Health show granular stages instead of one generic sleeping block.
+      final sleepStart = now.subtract(const Duration(minutes: 20));
+      success &= await health.writeSleepSessionData(
+        startTime: sleepStart,
+        endTime: now,
+        recordingMethod: RecordingMethod.manual,
+        stages: [
+          HealthSleepSessionStage(
+            type: HealthDataType.SLEEP_AWAKE,
+            startTime: sleepStart,
+            endTime: sleepStart.add(const Duration(minutes: 2)),
+          ),
+          HealthSleepSessionStage(
+            type: HealthDataType.SLEEP_LIGHT,
+            startTime: sleepStart.add(const Duration(minutes: 2)),
+            endTime: sleepStart.add(const Duration(minutes: 8)),
+          ),
+          HealthSleepSessionStage(
+            type: HealthDataType.SLEEP_DEEP,
+            startTime: sleepStart.add(const Duration(minutes: 8)),
+            endTime: sleepStart.add(const Duration(minutes: 14)),
+          ),
+          HealthSleepSessionStage(
+            type: HealthDataType.SLEEP_REM,
+            startTime: sleepStart.add(const Duration(minutes: 14)),
+            endTime: now,
+          ),
+        ],
+      );
     }
 
     // specialized write methods
