@@ -247,6 +247,129 @@ class HealthDataWriter {
         )
     }
 
+    /// Writes one sleep session as HealthKit sleep analysis samples.
+    ///
+    /// HealthKit has no sleep session record, so the session is represented by one full-window
+    /// `.inBed` sample plus overlapping concrete stage samples within that same window.
+    /// - Parameters:
+    ///   - call: Flutter method call
+    ///   - result: Flutter result callback
+    func writeSleepSessionData(call: FlutterMethodCall, result: @escaping FlutterResult) throws {
+        guard let arguments = call.arguments as? NSDictionary,
+              let startTime = arguments["startTime"] as? NSNumber,
+              let endTime = arguments["endTime"] as? NSNumber,
+              let stages = arguments["stages"] as? [NSDictionary],
+              let recordingMethod = arguments["recordingMethod"] as? Int
+        else {
+            throw PluginError(message: "Invalid Arguments")
+        }
+
+        guard !stages.isEmpty else {
+            throw PluginError(message: "Sleep session stages must not be empty")
+        }
+
+        let dateFrom = HealthUtilities.dateFromMilliseconds(startTime.doubleValue)
+        let dateTo = HealthUtilities.dateFromMilliseconds(endTime.doubleValue)
+
+        guard dateFrom <= dateTo else {
+            throw PluginError(message: "Sleep session startTime must be equal or earlier than endTime")
+        }
+
+        guard let sleepAnalysisType = dataTypesDict[HealthConstants.SLEEP_IN_BED] as? HKCategoryType else {
+            print("Warning: Sleep analysis type not available on this iOS version.")
+            result(false)
+            return
+        }
+
+        let clientRecordId = arguments["clientRecordId"] as? String
+        let clientRecordVersion = arguments["clientRecordVersion"] as? NSNumber
+        let sleepSessionId = clientRecordId ?? UUID().uuidString
+        let isManualEntry = recordingMethod == HealthConstants.RecordingMethod.manual.rawValue
+
+        var metadata: [String: Any] = [
+            HKMetadataKeyWasUserEntered: NSNumber(value: isManualEntry),
+            "HumeSleepSessionId": sleepSessionId,
+        ]
+        if let clientRecordId {
+            metadata["clientRecordId"] = clientRecordId
+        }
+        if let clientRecordVersion {
+            metadata["clientRecordVersion"] = clientRecordVersion
+        }
+
+        var samples: [HKSample] = [
+            HKCategorySample(
+                type: sleepAnalysisType,
+                value: HKCategoryValueSleepAnalysis.inBed.rawValue,
+                start: dateFrom,
+                end: dateTo,
+                metadata: metadata
+            ),
+        ]
+
+        for stage in stages {
+            guard let stageType = stage["dataTypeKey"] as? String,
+                  let stageStartTime = stage["startTime"] as? NSNumber,
+                  let stageEndTime = stage["endTime"] as? NSNumber
+            else {
+                throw PluginError(message: "Invalid sleep stage")
+            }
+
+            guard isSleepSessionStage(stageType) else {
+                throw PluginError(message: "Unsupported sleep stage type: \(stageType)")
+            }
+
+            let stageStart = HealthUtilities.dateFromMilliseconds(stageStartTime.doubleValue)
+            let stageEnd = HealthUtilities.dateFromMilliseconds(stageEndTime.doubleValue)
+
+            guard stageStart <= stageEnd else {
+                throw PluginError(message: "Sleep stage startTime must be equal or earlier than endTime")
+            }
+            guard stageStart >= dateFrom, stageEnd <= dateTo else {
+                throw PluginError(message: "Sleep stages must be within the session range")
+            }
+
+            let safeValue = resolvedCategoryValue(
+                for: stageType,
+                rawValue: HKCategoryValueSleepAnalysis.asleep.rawValue
+            )
+            samples.append(
+                HKCategorySample(
+                    type: sleepAnalysisType,
+                    value: safeValue,
+                    start: stageStart,
+                    end: stageEnd,
+                    metadata: metadata
+                )
+            )
+        }
+
+        healthStore.save(
+            samples,
+            withCompletion: { success, error in
+                if let err = error {
+                    print("Error Saving Sleep Session Samples: \(err.localizedDescription)")
+                }
+                DispatchQueue.main.async {
+                    result(success)
+                }
+            }
+        )
+    }
+
+    private func isSleepSessionStage(_ type: String) -> Bool {
+        switch type {
+        case HealthConstants.SLEEP_LIGHT,
+             HealthConstants.SLEEP_DEEP,
+             HealthConstants.SLEEP_REM,
+             HealthConstants.SLEEP_AWAKE,
+             HealthConstants.SLEEP_ASLEEP:
+            return true
+        default:
+            return false
+        }
+    }
+
     /// Starts a new workout route builder session.
     /// - Parameters:
     ///   - call: Flutter method call
