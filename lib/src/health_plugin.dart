@@ -646,14 +646,11 @@ class Health {
     return success ?? false;
   }
 
-  /// Writes one Health Connect `SleepSessionRecord` containing multiple sleep
-  /// [stages] (a hypnogram).
+  /// Writes a sleep session containing multiple sleep [stages] (a hypnogram).
   ///
-  /// Use this instead of multiple [writeHealthData] calls so Health Connect (and
-  /// downstream readers like Samsung Health) sees a single session with granular
-  /// awake/light/deep/REM stages rather than separate generic sleeping blocks.
-  ///
-  /// This API is Android only.
+  /// On Android this writes one Health Connect `SleepSessionRecord` with stages.
+  /// On iOS this writes one full-session `.sleepAnalysis` in-bed sample plus
+  /// overlapping stage samples within that window.
   Future<bool> writeSleepSessionData({
     required DateTime startTime,
     required DateTime endTime,
@@ -662,11 +659,9 @@ class Health {
     String? clientRecordId,
     double? clientRecordVersion,
   }) async {
-    if (!Platform.isAndroid) {
-      throw UnsupportedError('writeSleepSessionData is only available on Android');
+    if (Platform.isAndroid) {
+      await _checkIfHealthConnectAvailableOnAndroid();
     }
-
-    await _checkIfHealthConnectAvailableOnAndroid();
 
     if (startTime.isAfter(endTime)) {
       throw ArgumentError("startTime must be equal or earlier than endTime");

@@ -133,6 +133,15 @@ public class SwiftHealthPlugin: NSObject, FlutterPlugin {
                                     details: nil))
             }
 
+        case "writeSleepSessionData":
+            do {
+                try healthDataWriter.writeSleepSessionData(call: call, result: result)
+            } catch {
+                result(FlutterError(code: "WRITE_ERROR",
+                                    message: "Error writing sleep session: \(error.localizedDescription)",
+                                    details: nil))
+            }
+
         case "startWorkoutRoute":
             healthDataWriter.startWorkoutRoute(call: call, result: result)
 
