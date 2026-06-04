@@ -213,6 +213,71 @@ class HealthDataWriter(
         }
 
     /**
+     * Writes one Health Connect [SleepSessionRecord] containing multiple sleep stages (a
+     * hypnogram). Use this instead of one single-stage record per block so readers like Samsung
+     * Health can show granular awake/light/deep/REM breakdown.
+     *
+     * @param call Method call containing 'startTime', 'endTime', 'stages', 'recordingMethod' and
+     * optional client record fields. Each stage is a map with 'dataTypeKey', 'startTime', 'endTime'.
+     * @param result Flutter result callback returning boolean success status
+     */
+    fun writeSleepSessionData(call: MethodCall, result: Result) {
+        val startTime = call.argument<Long>("startTime")!!
+        val endTime = call.argument<Long>("endTime")!!
+        val rawStages = call.argument<List<Map<String, Any?>>>("stages") ?: emptyList()
+        val recordingMethod = call.argument<Int>("recordingMethod")!!
+        val clientRecordId: String? = call.argument("clientRecordId")
+        val clientRecordVersion: Double? = call.argument<Double>("clientRecordVersion")
+        val deviceType: Int? = call.argument<Int>("deviceType")
+
+        val metadata: Metadata = buildMetadata(
+            recordingMethod = recordingMethod,
+            clientRecordId = clientRecordId,
+            clientRecordVersion = clientRecordVersion?.toLong(),
+            deviceType = deviceType,
+        )
+
+        val stages = rawStages.mapNotNull { stage ->
+            val type = stage["dataTypeKey"] as? String ?: return@mapNotNull null
+            val stageStart = (stage["startTime"] as? Number)?.toLong() ?: return@mapNotNull null
+            val stageEnd = (stage["endTime"] as? Number)?.toLong() ?: return@mapNotNull null
+            val stageType = mapSleepTypeToStage(type) ?: return@mapNotNull null
+            SleepSessionRecord.Stage(
+                Instant.ofEpochMilli(stageStart),
+                Instant.ofEpochMilli(stageEnd),
+                stageType,
+            )
+        }
+
+        if (stages.isEmpty()) {
+            Log.w("FLUTTER_HEALTH::ERROR", "[Health Connect] No valid sleep stages to write")
+            result.success(false)
+            return
+        }
+
+        scope.launch {
+            try {
+                val record = SleepSessionRecord(
+                    startTime = Instant.ofEpochMilli(startTime),
+                    endTime = Instant.ofEpochMilli(endTime),
+                    startZoneOffset = null,
+                    endZoneOffset = null,
+                    stages = stages,
+                    metadata = metadata,
+                )
+                healthConnectClient.insertRecords(listOf(record))
+                result.success(true)
+                Log.i("FLUTTER_HEALTH::SUCCESS", "[Health Connect] Sleep session was successfully added!")
+            } catch (e: Exception) {
+                Log.e("FLUTTER_HEALTH::ERROR", "[Health Connect] Error adding sleep session")
+                Log.e("FLUTTER_HEALTH::ERROR", e.message ?: "unknown error")
+                Log.e("FLUTTER_HEALTH::ERROR", e.stackTraceToString())
+                result.success(false)
+            }
+        }
+    }
+
+    /**
      * Writes a comprehensive workout session with optional distance and calorie data. Creates an
      * ExerciseSessionRecord with associated DistanceRecord and TotalCaloriesBurnedRecord if
      * supplementary data is provided.
@@ -890,6 +955,24 @@ class HealthDataWriter(
      * @param recordingMethod How sleep data was recorded
      * @return SleepSessionRecord Configured sleep session record
      */
+    /**
+     * Maps a Flutter sleep data type key to a Health Connect [SleepSessionRecord] stage constant.
+     * Returns null for unsupported types so they can be skipped.
+     */
+    private fun mapSleepTypeToStage(type: String): Int? {
+        return when (type) {
+            SLEEP_ASLEEP -> SleepSessionRecord.STAGE_TYPE_SLEEPING
+            SLEEP_LIGHT -> SleepSessionRecord.STAGE_TYPE_LIGHT
+            SLEEP_DEEP -> SleepSessionRecord.STAGE_TYPE_DEEP
+            SLEEP_REM -> SleepSessionRecord.STAGE_TYPE_REM
+            SLEEP_AWAKE -> SleepSessionRecord.STAGE_TYPE_AWAKE
+            SLEEP_AWAKE_IN_BED -> SleepSessionRecord.STAGE_TYPE_AWAKE_IN_BED
+            SLEEP_OUT_OF_BED -> SleepSessionRecord.STAGE_TYPE_OUT_OF_BED
+            SLEEP_UNKNOWN -> SleepSessionRecord.STAGE_TYPE_UNKNOWN
+            else -> null
+        }
+    }
+
     private fun createSleepRecord(
             startTime: Long,
             endTime: Long,
