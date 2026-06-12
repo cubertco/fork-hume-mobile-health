@@ -1217,3 +1217,51 @@ class MenstruationFlowHealthValue extends HealthValue {
   @override
   int get hashCode => Object.hash(flow, isStartOfCycle, wasUserEntered, dateTime);
 }
+
+/// A single entry in a batch write request.
+///
+/// Used with [Health.writeHealthDataList] to push multiple data points of the
+/// same [HealthDataType] in a single platform call, reducing Health Connect API
+/// quota consumption (one call charges one quota unit regardless of record count).
+class HealthDataBatchEntry {
+  /// The measured value for this data point.
+  final double value;
+
+  /// Start of the measurement interval.
+  final DateTime startTime;
+
+  /// End of the measurement interval.
+  ///
+  /// Defaults to [startTime] when not provided (point-in-time measurement).
+  final DateTime endTime;
+
+  /// Optional stable identifier for this record, used for idempotent re-push.
+  ///
+  /// On Android this becomes the Health Connect `clientRecordId`.
+  /// On iOS this is written as `HKMetadataKeySyncIdentifier` so repeated saves
+  /// with the same id are de-duplicated by HealthKit.
+  final String? clientRecordId;
+
+  /// Version of the record; only meaningful when [clientRecordId] is set.
+  ///
+  /// Health Connect uses this to resolve conflicts between records sharing the
+  /// same `clientRecordId`.  iOS requires the sync version to be an integer.
+  final double? clientRecordVersion;
+
+  HealthDataBatchEntry({
+    required this.value,
+    required this.startTime,
+    DateTime? endTime,
+    this.clientRecordId,
+    this.clientRecordVersion,
+  }) : endTime = endTime ?? startTime;
+
+  /// Serialise to the map shape expected by the `writeDataList` channel method.
+  Map<String, dynamic> toMap() => {
+        'value': value,
+        'startTime': startTime.millisecondsSinceEpoch,
+        'endTime': endTime.millisecondsSinceEpoch,
+        'clientRecordId': clientRecordId,
+        'clientRecordVersion': clientRecordVersion,
+      };
+}

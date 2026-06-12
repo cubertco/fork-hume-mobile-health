@@ -606,6 +606,69 @@ class Health {
     return success ?? false;
   }
 
+  /// Writes multiple health data points of the same [type] in a single
+  /// platform call.
+  ///
+  /// This issues ONE `insertRecords` call to Health Connect (instead of one per
+  /// record), which is critical for large batches: Health Connect charges quota
+  /// per API call, not per record, and allows up to 1 000 records per call.
+  /// On iOS the batch is a single `HKHealthStore.save([HKObject])` invocation,
+  /// and each entry that carries a [HealthDataBatchEntry.clientRecordId] has
+  /// `HKMetadataKeySyncIdentifier` / `HKMetadataKeySyncVersion` set so that
+  /// repeated pushes of the same logical record are safely de-duplicated.
+  ///
+  /// Returns `true` if all records were stored successfully, `false` if any
+  /// entry maps to an unsupported type. A [PlatformException] is propagated
+  /// when the platform layer itself returns an error (e.g. HC quota exceeded).
+  ///
+  /// Parameters:
+  ///  * [type] - the [HealthDataType] shared by every entry in the batch.
+  ///  * [entries] - list of [HealthDataBatchEntry] objects. An empty list
+  ///    returns `true` immediately without any platform call.
+  ///  * [recordingMethod] - how the data was recorded, automatic by default.
+  ///    On iOS this must be [RecordingMethod.manual] or
+  ///    [RecordingMethod.automatic].
+  Future<bool> writeHealthDataList({
+    required HealthDataType type,
+    required List<HealthDataBatchEntry> entries,
+    RecordingMethod recordingMethod = RecordingMethod.automatic,
+  }) async {
+    if (entries.isEmpty) return true;
+
+    await _checkIfHealthConnectAvailableOnAndroid();
+    await _checkIfDataTypeAvailableOnDevice(type);
+
+    if (Platform.isIOS && [RecordingMethod.active, RecordingMethod.unknown].contains(recordingMethod)) {
+      throw ArgumentError("recordingMethod must be manual or automatic on iOS");
+    }
+
+    if (type == HealthDataType.WORKOUT) {
+      throw ArgumentError("Adding workouts should be done using the writeWorkoutData method.");
+    }
+    if (type == HealthDataType.ACTIVITY_INTENSITY) {
+      throw ArgumentError("Adding activity intensity data should be done using the writeActivityIntensity method.");
+    }
+    if (!isDataTypeAvailable(type)) {
+      throw HealthException(type, 'Not available on platform $platformType');
+    }
+
+    for (final entry in entries) {
+      if (entry.startTime.isAfter(entry.endTime)) {
+        throw ArgumentError("Every entry startTime must be equal or earlier than endTime");
+      }
+    }
+
+    final Map<String, dynamic> args = {
+      'dataTypeKey': type.name,
+      'recordingMethod': recordingMethod.toInt(),
+      'entries': entries.map((e) => e.toMap()).toList(),
+    };
+
+    // Let PlatformException propagate — the caller needs the real error message.
+    final bool? success = await _channel.invokeMethod<bool>('writeDataList', args);
+    return success ?? false;
+  }
+
   /// Writes an [ActivityIntensityRecord] to Google Health Connect.
   ///
   /// This API is Android only.
