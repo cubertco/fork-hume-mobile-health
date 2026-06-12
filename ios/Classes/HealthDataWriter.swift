@@ -286,15 +286,22 @@ class HealthDataWriter {
         let sleepSessionId = clientRecordId ?? UUID().uuidString
         let isManualEntry = recordingMethod == HealthConstants.RecordingMethod.manual.rawValue
 
-        var metadata: [String: Any] = [
+        var baseMetadata: [String: Any] = [
             HKMetadataKeyWasUserEntered: NSNumber(value: isManualEntry),
             "HumeSleepSessionId": sleepSessionId,
         ]
         if let clientRecordId {
-            metadata["clientRecordId"] = clientRecordId
+            baseMetadata["clientRecordId"] = clientRecordId
         }
         if let clientRecordVersion {
-            metadata["clientRecordVersion"] = clientRecordVersion
+            baseMetadata["clientRecordVersion"] = clientRecordVersion
+        }
+
+        var inBedMetadata = baseMetadata
+        if let clientRecordId {
+            let syncVersion = NSNumber(value: clientRecordVersion?.int64Value ?? 1)
+            inBedMetadata[HKMetadataKeySyncIdentifier] = "\(clientRecordId)-inBed"
+            inBedMetadata[HKMetadataKeySyncVersion] = syncVersion
         }
 
         var samples: [HKSample] = [
@@ -303,7 +310,7 @@ class HealthDataWriter {
                 value: HKCategoryValueSleepAnalysis.inBed.rawValue,
                 start: dateFrom,
                 end: dateTo,
-                metadata: metadata
+                metadata: inBedMetadata
             ),
         ]
 
@@ -329,6 +336,13 @@ class HealthDataWriter {
                 throw PluginError(message: "Sleep stages must be within the session range")
             }
 
+            var stageMetadata = baseMetadata
+            if let clientRecordId {
+                let syncVersion = NSNumber(value: clientRecordVersion?.int64Value ?? 1)
+                stageMetadata[HKMetadataKeySyncIdentifier] = "\(clientRecordId)-\(stageType)-\(stageStartTime)"
+                stageMetadata[HKMetadataKeySyncVersion] = syncVersion
+            }
+
             let safeValue = resolvedCategoryValue(
                 for: stageType,
                 rawValue: HKCategoryValueSleepAnalysis.asleep.rawValue
@@ -339,7 +353,7 @@ class HealthDataWriter {
                     value: safeValue,
                     start: stageStart,
                     end: stageEnd,
-                    metadata: metadata
+                    metadata: stageMetadata
                 )
             )
         }
