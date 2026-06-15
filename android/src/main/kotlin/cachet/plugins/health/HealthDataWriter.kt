@@ -171,6 +171,68 @@ class HealthDataWriter(
         }
     }
 
+    /**
+     * Writes a batch of health records of the same type in a single Health Connect call.
+     *
+     * Issuing one [insertRecords] call instead of one per record dramatically reduces quota
+     * consumption (Health Connect charges quota per API call, not per record).
+     *
+     * @param call Method call containing 'dataTypeKey', 'recordingMethod', and 'entries'
+     *             (a list of maps with 'value', 'startTime', 'endTime', 'clientRecordId',
+     *             'clientRecordVersion').
+     * @param result Flutter result callback. Returns false (with a log) if any entry maps
+     *               to an unsupported type, or propagates the real Health Connect error via
+     *               result.error so the Dart caller receives the exception message.
+     */
+    fun writeDataList(call: MethodCall, result: Result) {
+        val type = call.argument<String>("dataTypeKey")!!
+        val recordingMethod = call.argument<Int>("recordingMethod")!!
+        val rawEntries = call.argument<List<Map<String, Any?>>>("entries") ?: emptyList()
+        val deviceType: Int? = call.argument<Int>("deviceType")
+
+        Log.i(
+            "FLUTTER_HEALTH",
+            "writeDataList: type=$type, entries=${rawEntries.size}, recordingMethod=$recordingMethod"
+        )
+
+        val records = mutableListOf<Record>()
+        for (entry in rawEntries) {
+            val startTime = (entry["startTime"] as Number).toLong()
+            val endTime = (entry["endTime"] as Number).toLong()
+            val value = (entry["value"] as Number).toDouble()
+            val clientRecordId = entry["clientRecordId"] as? String
+            val clientRecordVersion = (entry["clientRecordVersion"] as? Number)?.toLong()
+
+            val metadata = buildMetadata(
+                recordingMethod = recordingMethod,
+                clientRecordId = clientRecordId,
+                clientRecordVersion = clientRecordVersion,
+                deviceType = deviceType,
+            )
+
+            val record = createRecord(type, startTime, endTime, value, metadata)
+            if (record == null) {
+                Log.e(
+                    "FLUTTER_HEALTH::ERROR",
+                    "writeDataList: unsupported type $type — aborting batch"
+                )
+                result.success(false)
+                return
+            }
+            records.add(record)
+        }
+
+        scope.launch {
+            try {
+                healthConnectClient.insertRecords(records)
+                result.success(true)
+            } catch (e: Exception) {
+                Log.e("FLUTTER_HEALTH::ERROR", "writeDataList failed for $type: ${e.message}")
+                result.error("WRITE_DATA_LIST_FAILED", e.message, null)
+            }
+        }
+    }
+
         fun writeActivityIntensity(call: MethodCall, result: Result) {
                 val intensityType = call.argument<Int>("intensityType")!!
                 val startTime = Instant.ofEpochMilli(call.argument<Long>("startTime")!!)

@@ -172,6 +172,48 @@ class HealthDataWriter {
         }
     }
 
+    // MARK: - Internal helpers
+
+    /// Builds a single [HKObject] from raw field values, applying the same type/unit
+    /// mapping as [writeData].  Returns nil (with a console warning) for unrecognised
+    /// types/units rather than throwing, so the caller can decide how to handle it.
+    private func buildSample(
+        type: String,
+        unit: String,
+        value: Double,
+        dateFrom: Date,
+        dateTo: Date,
+        metadata: [String: Any]
+    ) -> HKObject? {
+        guard let sampleType = dataTypesDict[type] else {
+            print("Warning: Health data type '\(type)' not available on this iOS version.")
+            return nil
+        }
+
+        if let categoryType = sampleType as? HKCategoryType {
+            let safeValue = resolvedCategoryValue(for: type, rawValue: Int(value))
+            return HKCategorySample(
+                type: categoryType, value: safeValue, start: dateFrom,
+                end: dateTo, metadata: metadata
+            )
+        } else if let quantityType = sampleType as? HKQuantityType {
+            guard let hkUnit = unitDict[unit] else {
+                print("Warning: Health data unit '\(unit)' not available on this iOS version.")
+                return nil
+            }
+            let quantity = HKQuantity(unit: hkUnit, doubleValue: value)
+            return HKQuantitySample(
+                type: quantityType, quantity: quantity, start: dateFrom,
+                end: dateTo, metadata: metadata
+            )
+        } else {
+            print("Warning: Unsupported HealthKit sample type for '\(type)'.")
+            return nil
+        }
+    }
+
+    // MARK: - Write methods
+
     /// Writes general health data
     /// - Parameters:
     ///   - call: Flutter method call
@@ -202,34 +244,10 @@ class HealthDataWriter {
             HKMetadataKeyWasUserEntered: NSNumber(value: isManualEntry),
         ]
 
-        guard let sampleType = dataTypesDict[type] else {
-            print("Warning: Health data type '\(type)' not available on this iOS version.")
-            result(false)
-            return
-        }
-
-        let sample: HKObject
-
-        if let categoryType = sampleType as? HKCategoryType {
-            let safeValue = resolvedCategoryValue(for: type, rawValue: Int(value))
-            sample = HKCategorySample(
-                type: categoryType, value: safeValue, start: dateFrom,
-                end: dateTo, metadata: metadata
-            )
-        } else if let quantityType = sampleType as? HKQuantityType {
-            guard let hkUnit = unitDict[unit] else {
-                print("Warning: Health data unit '\(unit)' not available on this iOS version.")
-                result(false)
-                return
-            }
-
-            let quantity = HKQuantity(unit: hkUnit, doubleValue: value)
-            sample = HKQuantitySample(
-                type: quantityType, quantity: quantity, start: dateFrom,
-                end: dateTo, metadata: metadata
-            )
-        } else {
-            print("Warning: Unsupported HealthKit sample type for '\(type)'.")
+        guard let sample = buildSample(
+            type: type, unit: unit, value: value,
+            dateFrom: dateFrom, dateTo: dateTo, metadata: metadata
+        ) else {
             result(false)
             return
         }
@@ -242,6 +260,88 @@ class HealthDataWriter {
                 }
                 DispatchQueue.main.async {
                     result(success)
+                }
+            }
+        )
+    }
+
+    /// Writes multiple health data points of the same type in a single HealthKit call.
+    ///
+    /// A single `HKHealthStore.save([HKObject])` is used so quota / throttle impact is
+    /// minimised.  Each entry that carries a `clientRecordId` gets
+    /// `HKMetadataKeySyncIdentifier` + `HKMetadataKeySyncVersion` set, which makes
+    /// repeated pushes of the same logical record safely idempotent.
+    ///
+    /// **HealthKit rule**: `HKMetadataKeySyncIdentifier` must always be accompanied by
+    /// `HKMetadataKeySyncVersion` (an integer NSNumber); setting one without the other
+    /// causes the save to throw.
+    ///
+    /// - Parameters:
+    ///   - call: Flutter method call containing `dataTypeKey`, `dataUnitKey`,
+    ///           `recordingMethod`, and `entries` (array of entry dicts).
+    ///   - result: Flutter result callback — `true` on success,
+    ///             `FlutterError(WRITE_DATA_LIST_FAILED)` on HealthKit error.
+    func writeDataList(call: FlutterMethodCall, result: @escaping FlutterResult) throws {
+        guard let arguments = call.arguments as? NSDictionary,
+              let type = arguments["dataTypeKey"] as? String,
+              let unit = arguments["dataUnitKey"] as? String,
+              let recordingMethod = arguments["recordingMethod"] as? Int,
+              let rawEntries = arguments["entries"] as? [NSDictionary]
+        else {
+            throw PluginError(message: "Invalid Arguments")
+        }
+
+        let isManualEntry = recordingMethod == HealthConstants.RecordingMethod.manual.rawValue
+
+        var samples: [HKObject] = []
+        for entry in rawEntries {
+            guard let value = entry["value"] as? Double,
+                  let startMs = entry["startTime"] as? NSNumber,
+                  let endMs = entry["endTime"] as? NSNumber
+            else {
+                throw PluginError(message: "Invalid entry in entries list")
+            }
+
+            let dateFrom = HealthUtilities.dateFromMilliseconds(startMs.doubleValue)
+            let dateTo = HealthUtilities.dateFromMilliseconds(endMs.doubleValue)
+
+            let clientRecordId = entry["clientRecordId"] as? String
+            let clientRecordVersion = entry["clientRecordVersion"] as? NSNumber
+
+            var metadata: [String: Any] = [
+                HKMetadataKeyWasUserEntered: NSNumber(value: isManualEntry),
+            ]
+            if let crid = clientRecordId {
+                // HKMetadataKeySyncIdentifier requires HKMetadataKeySyncVersion (integer).
+                let syncVersion = NSNumber(value: clientRecordVersion?.int64Value ?? 1)
+                metadata["clientRecordId"] = crid
+                metadata[HKMetadataKeySyncIdentifier] = crid
+                metadata[HKMetadataKeySyncVersion] = syncVersion
+            }
+
+            guard let sample = buildSample(
+                type: type, unit: unit, value: value,
+                dateFrom: dateFrom, dateTo: dateTo, metadata: metadata
+            ) else {
+                result(false)
+                return
+            }
+            samples.append(sample)
+        }
+
+        healthStore.save(
+            samples,
+            withCompletion: { success, error in
+                DispatchQueue.main.async {
+                    if let err = error {
+                        result(FlutterError(
+                            code: "WRITE_DATA_LIST_FAILED",
+                            message: err.localizedDescription,
+                            details: nil
+                        ))
+                    } else {
+                        result(success)
+                    }
                 }
             }
         )

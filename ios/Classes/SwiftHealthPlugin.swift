@@ -88,6 +88,15 @@ public class SwiftHealthPlugin: NSObject, FlutterPlugin {
                                     details: nil))
             }
 
+        case "writeDataList":
+            do {
+                try healthDataWriter.writeDataList(call: call, result: result)
+            } catch {
+                result(FlutterError(code: "WRITE_DATA_LIST_FAILED",
+                                    message: "Error writing data list: \(error.localizedDescription)",
+                                    details: nil))
+            }
+
         case "writeAudiogram":
             do {
                 try healthDataWriter.writeAudiogram(call: call, result: result)
