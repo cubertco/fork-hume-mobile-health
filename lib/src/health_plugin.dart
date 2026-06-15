@@ -660,6 +660,7 @@ class Health {
 
     final Map<String, dynamic> args = {
       'dataTypeKey': type.name,
+      'dataUnitKey': dataTypeToUnit[type]!.name,
       'recordingMethod': recordingMethod.toInt(),
       'entries': entries.map((e) => e.toMap()).toList(),
     };
