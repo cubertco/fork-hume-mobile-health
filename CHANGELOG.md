@@ -1,3 +1,10 @@
+## 13.4.0
+
+* iOS: Add Swift Package Manager support (`ios/health/Package.swift`). CocoaPods remains supported.
+* iOS **BREAKING**: Requires Flutter `>=3.44.0` — the plugin's Swift package depends on the `FlutterFramework` package, which Flutter only generates from 3.44.0 onward.
+* iOS: The native plugin class is now `HealthPlugin` (previously the Objective-C shim `HealthPlugin` forwarding to `SwiftHealthPlugin`). `pluginClass` is unchanged; no action needed for Dart users.
+* iOS: Run `flutter clean` once after upgrading. The removed `HealthPlugin.h` lingers in an already-built `health.framework/Headers/` and collides with the Swift-generated `HealthPlugin` (`'HealthPlugin' has different definitions in different modules`). Fresh checkouts and CI are unaffected.
+
 ## 13.3.2
 
 * iOS **BREAKING**: `requestAuthorization` now returns `true` for requests containing write/share sample types only when every requested write type is `.sharingAuthorized` after the HealthKit sheet. Previously the native layer forwarded HealthKit's completion `success`, which means the authorization request completed, not that the user granted access. Read-only requests still return the HealthKit completion flag because Apple does not disclose read authorization status.

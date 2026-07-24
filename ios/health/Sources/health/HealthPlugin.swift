@@ -3,7 +3,7 @@ import HealthKit
 import UIKit
 
 /// Main plugin class that coordinates health data operations
-public class SwiftHealthPlugin: NSObject, FlutterPlugin {
+public class HealthPlugin: NSObject, FlutterPlugin {
     // Health store and type dictionaries
     let healthStore = HKHealthStore()
     var healthDataTypes = [HKSampleType]()
@@ -47,7 +47,7 @@ public class SwiftHealthPlugin: NSObject, FlutterPlugin {
         let channel = FlutterMethodChannel(
             name: "flutter_health", binaryMessenger: registrar.messenger()
         )
-        let instance = SwiftHealthPlugin()
+        let instance = HealthPlugin()
         registrar.addMethodCallDelegate(instance, channel: channel)
     }
 

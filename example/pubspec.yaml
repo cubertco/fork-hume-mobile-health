@@ -1,11 +1,11 @@
 name: health_example
 description: Demonstrates how to use the health plugin.
 publish_to: "none"
-version: 13.3.2
+version: 13.4.0
 
 environment:
   sdk: ">=3.8.0 <4.0.0"
-  flutter: ">=3.6.0"
+  flutter: ">=3.44.0"
 
 dependencies:
   flutter:
