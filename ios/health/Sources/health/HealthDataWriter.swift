@@ -201,6 +201,12 @@ class HealthDataWriter {
                 print("Warning: Health data unit '\(unit)' not available on this iOS version.")
                 return nil
             }
+            guard unit != HealthConstants.NO_UNIT,
+                  unit != HealthConstants.UNKNOWN_UNIT,
+                  quantityType.is(compatibleWith: hkUnit) else {
+                print("Warning: Unit '\(unit)' is not compatible with '\(type)'. Skipping sample.")
+                return nil
+            }
             let quantity = HKQuantity(unit: hkUnit, doubleValue: value)
             return HKQuantitySample(
                 type: quantityType, quantity: quantity, start: dateFrom,

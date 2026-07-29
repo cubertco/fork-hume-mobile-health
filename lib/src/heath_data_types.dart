@@ -285,7 +285,8 @@ const Map<HealthDataType, HealthDataUnit> dataTypeToUnit = {
   HealthDataType.BLOOD_PRESSURE_SYSTOLIC: HealthDataUnit.MILLIMETER_OF_MERCURY,
   HealthDataType.BODY_FAT_PERCENTAGE: HealthDataUnit.PERCENT,
   HealthDataType.LEAN_BODY_MASS: HealthDataUnit.KILOGRAM,
-  HealthDataType.BODY_MASS_INDEX: HealthDataUnit.NO_UNIT,
+  // HealthKit needs the count unit for BMI
+  HealthDataType.BODY_MASS_INDEX: HealthDataUnit.COUNT,
   HealthDataType.BODY_TEMPERATURE: HealthDataUnit.DEGREE_CELSIUS,
   HealthDataType.SLEEP_WRIST_TEMPERATURE: HealthDataUnit.DEGREE_CELSIUS,
   HealthDataType.BODY_WATER_MASS: HealthDataUnit.KILOGRAM,
