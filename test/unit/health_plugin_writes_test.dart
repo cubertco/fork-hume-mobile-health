@@ -94,6 +94,23 @@ void main() {
       expect(args['dataUnitKey'], HealthDataUnit.BEATS_PER_MINUTE.name);
       expect(args['recordingMethod'], RecordingMethod.manual.toInt());
     });
+
+    test('BMI uses COUNT unit, not NO_UNIT (STAR-3865)', () async {
+      ctx.channel.when('writeData', true);
+
+      final success = await ctx.health.writeHealthData(
+        value: 26.6,
+        type: HealthDataType.BODY_MASS_INDEX,
+        startTime: HealthFixtures.start,
+        endTime: HealthFixtures.end,
+      );
+
+      expect(success, isTrue);
+      final call = ctx.channel.lastCallFor('writeData');
+      expect(call, isNotNull);
+      final args = Map<String, dynamic>.from(call!.arguments as Map);
+      expect(args['dataUnitKey'], HealthDataUnit.COUNT.name);
+    });
   });
 
   group('writeActivityIntensity', () {

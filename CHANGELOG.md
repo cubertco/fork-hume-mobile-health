@@ -1,3 +1,8 @@
+## 13.4.1
+
+* iOS: Fix fatal `_HKObjectValidationFailureException` crash when writing BMI to Apple Health (STAR-3865). `BODY_MASS_INDEX` now maps to `HealthDataUnit.COUNT` (HealthKit requires `HKUnit.count()` for BMI) instead of `NO_UNIT`, which resolved to an empty — and invalid — `HKUnit`.
+* iOS: `writeData`/`writeDataList` now skip samples whose unit is incompatible with the quantity type (with a console warning) instead of letting HealthKit throw an uncaught ObjC `NSException` that terminates the app.
+
 ## 13.4.0
 
 * iOS: Add Swift Package Manager support (`ios/health/Package.swift`). CocoaPods remains supported.
