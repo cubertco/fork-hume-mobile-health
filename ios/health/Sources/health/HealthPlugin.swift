@@ -97,6 +97,15 @@ public class HealthPlugin: NSObject, FlutterPlugin {
                                     details: nil))
             }
 
+        case "writeDataUUID":
+            do {
+                try healthDataWriter.writeDataUUID(call: call, result: result)
+            } catch {
+                result(FlutterError(code: "WRITE_ERROR",
+                                    message: "Error writing data: \(error.localizedDescription)",
+                                    details: nil))
+            }
+            
         case "writeAudiogram":
             do {
                 try healthDataWriter.writeAudiogram(call: call, result: result)
@@ -141,6 +150,16 @@ public class HealthPlugin: NSObject, FlutterPlugin {
                                     message: "Error writing workout: \(error.localizedDescription)",
                                     details: nil))
             }
+            
+        case "writeWorkoutDataUUID":
+            do {
+                try healthDataWriter.writeWorkoutDataUUID(call: call, result: result)
+            } catch {
+                result(FlutterError(code: "WRITE_ERROR",
+                                    message: "Error writing workout: \(error.localizedDescription)",
+                                    details: nil))
+            }
+            
 
         case "writeSleepSessionData":
             do {

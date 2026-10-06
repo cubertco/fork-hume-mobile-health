@@ -1,3 +1,12 @@
+## 13.5.0
+
+* Merge upstream [carp-health-flutter 13.3.2](https://github.com/carp-dk/carp-health-flutter/blob/main/CHANGELOG.md#1332):
+  * `writeHealthDataUUID` / `writeWorkoutDataUUID` return the UUID of the written record - PR [#448](https://github.com/carp-dk/carp-health-flutter/pull/448)
+  * Fix [#502](https://github.com/carp-dk/carp-health-flutter/issues/502)
+  * iOS **BREAKING**: minimum deployment target raised to 15.0
+  * Bump `carp_serializable` to `^3.0.0` and other deps (upstream PR [#512](https://github.com/carp-dk/carp-health-flutter/pull/512), [#514](https://github.com/carp-dk/carp-health-flutter/pull/514))
+* Fork-only APIs kept: `writeHealthDataList`, `writeSleepSessionData`, BMI unit guard, SPM package.
+
 ## 13.4.1
 
 * iOS: Fix fatal `_HKObjectValidationFailureException` crash when writing BMI to Apple Health (STAR-3865). `BODY_MASS_INDEX` now maps to `HealthDataUnit.COUNT` (HealthKit requires `HKUnit.count()` for BMI) instead of `NO_UNIT`, which resolved to an empty — and invalid — `HKUnit`.
