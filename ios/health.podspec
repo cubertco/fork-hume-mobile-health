@@ -3,7 +3,7 @@
 #
 Pod::Spec.new do |s|
   s.name             = 'health'
-  s.version          = '13.4.0'
+  s.version          = '13.5.0'
   s.summary          = 'Wrapper for Apple\'s HealthKit on iOS and Google\'s Health Connect on Android.'
   s.description      = <<-DESC
 Wrapper for Apple's HealthKit on iOS and Google's Health Connect on Android.
@@ -15,8 +15,9 @@ Wrapper for Apple's HealthKit on iOS and Google's Health Connect on Android.
   s.source_files = 'health/Sources/health/**/*.swift'
   s.dependency 'Flutter'
 
-  s.ios.deployment_target = '14.0'
-  s.pod_target_xcconfig = { 'DEFINES_MODULE' => 'YES', 'VALID_ARCHS[sdk=iphonesimulator*]' => 'x86_64' }
+  s.ios.deployment_target = '15.0'
+
+  # Flutter.framework does not contain a i386 slice.
+  s.pod_target_xcconfig = { 'DEFINES_MODULE' => 'YES', 'EXCLUDED_ARCHS[sdk=iphonesimulator*]' => 'i386' }
   s.swift_version = '5.0'
 end
-
