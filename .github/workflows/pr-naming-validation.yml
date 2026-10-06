@@ -1,0 +1,94 @@
+# Managed by backend-platform Terraform. Update the module source, then review
+# the generated repository change before importing/reconciling protected files.
+name: (PR) Naming Validation
+
+on:
+  pull_request:
+    types: [opened, reopened, edited, synchronize, ready_for_review]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  validate-pr:
+    name: Validate PR Title, Description & Branch
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Validate PR metadata
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+          BRANCH_NAME: ${{ github.event.pull_request.head.ref }}
+          PR_AUTHOR_ID: ${{ github.event.pull_request.user.id }}
+          PR_AUTHOR_LOGIN: ${{ github.event.pull_request.user.login }}
+          PR_AUTHOR_TYPE: ${{ github.event.pull_request.user.type }}
+          HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
+          BASE_REPOSITORY: ${{ github.repository }}
+          DEPENDENCY_JIRA_KEY: STAR-5304
+        shell: python
+        run: |
+          """Validate PR metadata without executing or checking out contributor code."""
+
+          import os
+          import re
+          import sys
+
+
+          KEY = re.compile(r"(?<![A-Z0-9-])(?:HCS|STAR)-[0-9]+(?![A-Z0-9-])")
+
+
+          def validate(title, body, branch, author_id, author_login, author_type,
+                       head_repository, base_repository, dependency_key):
+              errors = []
+              title_keys = set(KEY.findall(title))
+              if not re.match(r"^[\[\], ]*(?:HCS|STAR)-[0-9]+(?=$|[^A-Z0-9-])", title):
+                  errors.append("Title must start with an HCS or STAR Jira key.")
+
+              # Actor is the PR author, not the person who edited or re-ran the workflow.
+              dependabot = (str(author_id) == "49699333" and
+                            author_login == "dependabot[bot]" and author_type == "Bot" and
+                            head_repository == base_repository)
+              if dependabot:
+                  if not re.match(r"^[\[\], ]*" + re.escape(dependency_key) + r"(?=$|[^A-Z0-9-])", title):
+                      errors.append(f"Dependabot title must reference {dependency_key}.")
+                  if not branch.startswith(f"automation/{dependency_key}-dependency-") or \
+                          branch == f"automation/{dependency_key}-dependency-":
+                      errors.append(f"Dependabot branch must start with automation/{dependency_key}-dependency- and have a suffix.")
+                  # Dependabot has no PR-body template. Its Terraform-configured title
+                  # supplies the required ticket reference; GitHub's Jira autolink resolves it.
+              else:
+                  body_keys = set(re.findall(
+                      r"https://cubertco\.atlassian\.net/browse/((?:HCS|STAR)-[0-9]+)(?![A-Z0-9-])", body))
+                  if not title_keys.intersection(body_keys):
+                      errors.append("Description must link a Jira key matching the title.")
+                  match = re.fullmatch(r"(?:feature|bugfix|automation)/((?:HCS|STAR)-[0-9]+)-.+", branch)
+                  if match:
+                      if match.group(1) not in title_keys:
+                          errors.append("Branch Jira key must match the title.")
+                  elif not re.fullmatch(r"(?:release|hotfix)/[^-].*", branch):
+                      errors.append("Use feature/bugfix/automation with an HCS or STAR key, or release/hotfix with a version.")
+              return errors
+
+
+          def main():
+              errors = validate(
+                  os.environ["PR_TITLE"], os.environ["PR_BODY"], os.environ["BRANCH_NAME"],
+                  os.environ["PR_AUTHOR_ID"], os.environ["PR_AUTHOR_LOGIN"],
+                  os.environ["PR_AUTHOR_TYPE"], os.environ["HEAD_REPOSITORY"],
+                  os.environ["BASE_REPOSITORY"], os.environ["DEPENDENCY_JIRA_KEY"])
+              # Print only our own messages, never untrusted metadata or workflow commands.
+              for message in errors:
+                  print(f"::error::{message}")
+              if errors:
+                  return 1
+              print("PR title, Jira reference, and branch satisfy repository policy.")
+              return 0
+
+
+          if __name__ == "__main__":
+              sys.exit(main())
