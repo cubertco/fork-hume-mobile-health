@@ -8,6 +8,14 @@ class HealthDataOperations {
     let characteristicsTypesDict: [String: HKCharacteristicType]
     let nutritionList: [String]
 
+    /// `authorizationStatus(for:)` is a synchronous XPC round trip to healthd. Right after a
+    /// device transfer healthd can stay silent longer than the 10 s the scene watchdog gives
+    /// the main thread, so every status loop runs here and only the result hops back to main.
+    private let authorizationStatusQueue = DispatchQueue(
+        label: "com.hume.health.authorization-status",
+        qos: .userInitiated
+    )
+
     /// - Parameters:
     ///   - healthStore: The HealthKit store
     ///   - dataTypesDict: Dictionary of data types
@@ -57,30 +65,40 @@ class HealthDataOperations {
             }
         }
 
+        let checkedTypes = types
+        let checkedPermissions = permissions
+        authorizationStatusQueue.async { [self] in
+            let granted = hasPermissions(types: checkedTypes, permissions: checkedPermissions)
+            DispatchQueue.main.async {
+                result(granted)
+            }
+        }
+    }
+
+    /// `nil` when HealthKit hides the grant (any read access), `false` at the first missing
+    /// write grant or unknown type, `true` when every write grant is present.
+    private func hasPermissions(types: [String], permissions: [Int]) -> Bool? {
         for (index, type) in types.enumerated() {
             guard let sampleType = dataTypesDict[type] else {
                 print("Warning: Health data type '\(type)' not found in dataTypesDict")
-                result(false)
-                return
+                return false
             }
 
             let success = hasPermission(type: sampleType, access: permissions[index])
             if success == nil || success == false {
-                result(success)
-                return
+                return success
             }
             if let characteristicType = characteristicsTypesDict[type] {
                 let characteristicSuccess = hasPermission(
                     type: characteristicType, access: permissions[index]
                 )
                 if characteristicSuccess == nil || characteristicSuccess == false {
-                    result(characteristicSuccess)
-                    return
+                    return characteristicSuccess
                 }
             }
         }
 
-        result(true)
+        return true
     }
 
     /// Check if we have permission for a specific type
@@ -177,30 +195,29 @@ class HealthDataOperations {
             }
         }
 
+        let requestedWriteTypes = typesToWrite
         healthStore.requestAuthorization(toShare: typesToWrite, read: typesToRead) { [self] success, error in
-            DispatchQueue.main.async { [self] in
-                if error != nil {
+            if error != nil || !success {
+                DispatchQueue.main.async {
                     result(false)
-                    return
                 }
-                if !success {
-                    result(false)
-                    return
-                }
-                // Read-only: Apple does not expose read grant; keep returning completion `success`
-                // (same coarse signal as before for callers that only request read).
-                if typesToWrite.isEmpty {
+                return
+            }
+            // Read-only: Apple does not expose read grant; keep returning completion `success`
+            // (same coarse signal as before for callers that only request read).
+            if requestedWriteTypes.isEmpty {
+                DispatchQueue.main.async {
                     result(success)
-                    return
                 }
-                for sampleType in typesToWrite {
-                    let status = self.healthStore.authorizationStatus(for: sampleType)
-                    if status != HKAuthorizationStatus.sharingAuthorized {
-                        result(false)
-                        return
-                    }
+                return
+            }
+            authorizationStatusQueue.async { [self] in
+                let granted = requestedWriteTypes.allSatisfy { sampleType in
+                    healthStore.authorizationStatus(for: sampleType) == HKAuthorizationStatus.sharingAuthorized
                 }
-                result(true)
+                DispatchQueue.main.async {
+                    result(granted)
+                }
             }
         }
     }

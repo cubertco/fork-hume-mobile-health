@@ -1,3 +1,7 @@
+## 13.5.1
+
+* iOS: `hasPermissions` and the write-grant check after `requestAuthorization` no longer call `HKHealthStore.authorizationStatus(for:)` on the main thread. The call is a synchronous XPC round trip to healthd; on a freshly transferred iPhone it stayed silent and the scene watchdog killed the app during Band sync and when the app came back to the foreground (STAR-5287). The status loop now runs on a private queue and only the result is delivered on main.
+
 ## 13.5.0
 
 * Merge upstream [carp-health-flutter 13.3.2](https://github.com/carp-dk/carp-health-flutter/blob/main/CHANGELOG.md#1332):
