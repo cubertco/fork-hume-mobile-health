@@ -1,3 +1,7 @@
+## 13.5.2
+
+* Android: sleep sessions, sleep stages and every other record built by `HealthDataConverter` now carry the writing app's package name in `source_id`, the same value as `source_name`. Before, `source_id` was an empty string, so the app could not tell two sleep sources apart (STAR-5239).
+
 ## 13.5.1
 
 * iOS: `hasPermissions` and the write-grant check after `requestAuthorization` no longer call `HKHealthStore.authorizationStatus(for:)` on the main thread. The call is a synchronous XPC round trip to healthd; on a freshly transferred iPhone it stayed silent and the scene watchdog killed the app during Band sync and when the app came back to the foreground (STAR-5287). The status loop now runs on a private queue and only the result is delivered on main.
