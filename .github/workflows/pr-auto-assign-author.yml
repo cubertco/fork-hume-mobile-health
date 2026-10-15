@@ -16,6 +16,6 @@ jobs:
       group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
       cancel-in-progress: true
     steps:
-      - uses: toshimaru/auto-author-assign@v1.6.2
+      - uses: toshimaru/auto-author-assign@v3.1.0
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
