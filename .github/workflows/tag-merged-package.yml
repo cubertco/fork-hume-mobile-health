@@ -1,0 +1,183 @@
+# Managed by backend-platform Terraform. No consumer checkout or code execution.
+name: Tag merged mobile package
+"on":
+  pull_request_target:
+    types: [closed]
+    branches: ["main","develop"]
+  workflow_dispatch:
+    inputs:
+      operation:
+        type: choice
+        options: [merge, bootstrap]
+        default: merge
+        description: Retry a merged PR or tag the reviewed migration commit
+      pr_number:
+        type: string
+        description: Merged PR number (merge operation only)
+permissions: {}
+jobs:
+  tag:
+    if: >-
+      vars.MOBILE_TAGGING_ENABLED == 'true' &&
+      (github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+    # Per-PR grouping never cancels or drops another merge; API creation is atomic.
+    concurrency:
+      group: mobile-tag-${{ github.event.pull_request.number || inputs.pr_number || 'bootstrap' }}
+      cancel-in-progress: false
+    steps:
+      - name: Prepare empty credentials workspace
+        run: mkdir -p "$GITHUB_WORKSPACE"
+      - name: Authenticate only the trusted tagging workflow
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093
+        with:
+          project_id: hume-service-deployer
+          workload_identity_provider: ${{ vars.MOBILE_TAGGING_WIF_PROVIDER }}
+      - name: Read dedicated tagging App key
+        id: key
+        uses: google-github-actions/get-secretmanager-secrets@bc9c54b29fdffb8a47776820a7d26e77b379d262
+        with:
+          secrets: key:${{ vars.MOBILE_TAGGING_KEY_VERSION }}
+          export_to_environment: false
+      - name: Mint token for this repository only
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349
+        id: app
+        with:
+          app-id: ${{ vars.MOBILE_TAGGING_APP_ID }}
+          private-key: ${{ steps.key.outputs.key }}
+          owner: cubertco
+          repositories: fork-hume-mobile-health
+          permission-contents: write
+          permission-pull-requests: read
+      - name: Create or verify immutable merged-commit tag
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          TAG_CONFIG: '{"bootstrap_sha":"4177a4915884d9bf632dd35dbf7fa8eb925da854","branches":["main","develop"],"id":"1149896116","repository":"cubertco/fork-hume-mobile-health"}'
+        shell: python
+        run: |
+          """Create immutable tags from verified GitHub merge records; never execute repository code."""
+          import base64
+          import json
+          import os
+          import re
+          import urllib.error
+          import urllib.parse
+          import urllib.request
+          
+          
+          class API:
+              def __init__(self, token, repository):
+                  self.token, self.repository = token, repository
+          
+              def request(self, path, data=None):
+                  request = urllib.request.Request(
+                      f"https://api.github.com/repos/{self.repository}/{path}",
+                      data=None if data is None else json.dumps(data).encode(),
+                      headers={"Authorization": f"Bearer {self.token}", "Accept": "application/vnd.github+json",
+                               "X-GitHub-Api-Version": "2022-11-28", "Content-Type": "application/json"},
+                      method="GET" if data is None else "POST",
+                  )
+                  try:
+                      with urllib.request.urlopen(request, timeout=30) as response:
+                          return json.load(response)
+                  except urllib.error.HTTPError as error:
+                      if error.code == 404 and data is None:
+                          return None
+                      raise
+          
+          
+          def version_from_pubspec(content):
+              # Parse only a literal top-level semver. No YAML constructors or executable code.
+              matches = re.findall(r"^version:\s*['\"]?([0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?)['\"]?\s*(?:#.*)?$", content, re.M)
+              if len(matches) != 1:
+                  raise ValueError("pubspec must contain exactly one literal semantic version")
+              return matches[0]
+          
+          
+          def tag_name(version, suffix):
+              # Preserve a package's prerelease/build metadata while adding our unique qualifier.
+              core, plus, metadata = version.partition("+")
+              separator = "." if "-" in core else "-"
+              return f"v{core}{separator}ci.{suffix}" + (f"+{metadata}" if plus else "")
+          
+          
+          def resolve_target(api, config, event_name, event):
+              repository = api.request("")
+              if not repository or str(repository["id"]) != config["id"] or repository["full_name"] != config["repository"]:
+                  raise ValueError("repository identity differs from reviewed inventory")
+              if event_name == "pull_request_target":
+                  if event.get("action") != "closed" or not event.get("pull_request", {}).get("merged"):
+                      raise ValueError("only merged PR events may create tags")
+                  number = event["number"]
+              elif event_name == "workflow_dispatch":
+                  inputs = event.get("inputs", {})
+                  operation = inputs.get("operation", "merge")
+                  if operation not in ("merge", "bootstrap"):
+                      raise ValueError("unsupported dispatch operation")
+                  if operation == "bootstrap":
+                      sha = config["bootstrap_sha"]
+                      if not re.fullmatch(r"[0-9a-f]{40}", sha):
+                          raise ValueError("no reviewed bootstrap commit configured")
+                      return sha, f"bootstrap.{sha}"
+                  number = inputs.get("pr_number", "")
+              else:
+                  raise ValueError("unsupported event")
+              if not re.fullmatch(r"[1-9][0-9]*", str(number)):
+                  raise ValueError("a positive PR number is required")
+              pr = api.request(f"pulls/{number}")
+              if not pr or not pr.get("merged") or not pr.get("merged_at") or pr["state"] != "closed":
+                  raise ValueError("GitHub does not report a merged PR")
+              branch = pr["base"]["ref"]
+              if str(pr["base"]["repo"]["id"]) != config["id"] or branch not in config["branches"]:
+                  raise ValueError("merge target is outside the inventory")
+              sha = pr["merge_commit_sha"]
+              if not re.fullmatch(r"[0-9a-f]{40}", sha or ""):
+                  raise ValueError("missing actual merge commit")
+              # Check ancestry without replacing the actual merge SHA with the current branch tip.
+              comparison = api.request(f"compare/{sha}...{urllib.parse.quote(branch, safe='')}")
+              if not comparison or comparison["status"] not in ("ahead", "identical"):
+                  raise ValueError("merged commit is not on the declared integration branch")
+              # Hex encoding non-simple branch names avoids normalization collisions.
+              label = branch if re.fullmatch(r"[A-Za-z][A-Za-z0-9-]*", branch) and not branch.startswith("branch-") else "branch-" + branch.encode().hex()
+              return sha, f"{label}.pr.{number}"
+          
+          
+          def create_tag(api, config, event_name, event):
+              sha, suffix = resolve_target(api, config, event_name, event)
+              pubspec = api.request(f"contents/pubspec.yaml?ref={sha}")
+              if not pubspec or pubspec.get("encoding") != "base64":
+                  raise ValueError("cannot read pubspec at merged commit")
+              version = version_from_pubspec(base64.b64decode(pubspec["content"]).decode())
+              tag = tag_name(version, suffix)
+              path = "git/ref/tags/" + urllib.parse.quote(tag, safe="")
+              existing = api.request(path)
+              if existing is None:
+                  try:
+                      api.request("git/refs", {"ref": "refs/tags/" + tag, "sha": sha})
+                  except urllib.error.HTTPError as error:
+                      # Concurrent attempts may both observe no tag. Only accept an exact match.
+                      if error.code != 422:
+                          raise
+                  existing = api.request(path)
+              if not existing or existing["object"]["type"] != "commit" or existing["object"]["sha"] != sha:
+                  raise ValueError(f"tag collision or failed creation: {tag}; never move/delete the existing ref")
+              return {"repository": config["repository"], "tag": tag, "commit": sha}
+          
+          
+          def main():
+              config = json.loads(os.environ["TAG_CONFIG"])
+              with open(os.environ["GITHUB_EVENT_PATH"]) as stream:
+                  event = json.load(stream)
+              result = create_tag(API(os.environ["GH_TOKEN"], config["repository"]), config,
+                                  os.environ["GITHUB_EVENT_NAME"], event)
+              print(json.dumps(result))
+              with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as stream:
+                  stream.write(f"Created or verified `{result['tag']}` at `{result['commit']}`.\n")
+          
+          
+          if __name__ == "__main__":
+              main()
