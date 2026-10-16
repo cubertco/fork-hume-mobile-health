@@ -1,0 +1,78 @@
+# Managed by backend-platform Terraform (modules/mobile-tagging).
+name: Git dependency policy
+"on":
+  pull_request:
+  push:
+    branches: ["main","develop"]
+permissions:
+  contents: read
+jobs:
+  immutable-git-dependencies:
+    name: Check immutable Git dependencies
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Install YAML parser in isolated environment
+        run: |
+          python3 -m venv "$RUNNER_TEMP/dependency-policy"
+          "$RUNNER_TEMP/dependency-policy/bin/pip" install PyYAML==6.0.3
+      - name: Check manifests, overrides and locks
+        shell: bash
+        run: |
+          "$RUNNER_TEMP/dependency-policy/bin/python" - <<'PY'
+          """Reject moving Git dependency refs in manifests and committed lockfiles."""
+          from pathlib import Path
+          import re
+          import subprocess
+          import sys
+          import yaml
+          
+          TAG = re.compile(r"v?[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$")
+          SHA = re.compile(r"[0-9a-f]{40}$")
+          
+          
+          def check_document(path, document):
+              errors = []
+              if not isinstance(document, dict):
+                  return [f"{path}: expected a mapping"]
+              if path.endswith('.lock'):
+                  dependencies = document.get('packages', {})
+                  entries = [(name, item.get('description')) for name, item in dependencies.items() if item.get('source') == 'git']
+              else:
+                  entries = [(name, spec['git']) for section in ('dependencies', 'dev_dependencies', 'dependency_overrides')
+                             for name, spec in (document.get(section) or {}).items() if isinstance(spec, dict) and 'git' in spec]
+              for name, git in entries:
+                  if not isinstance(git, dict) or not isinstance(git.get('ref'), str):
+                      errors.append(f'{path}: {name} needs an explicit immutable Git ref')
+                      continue
+                  ref = git['ref']
+                  if not (TAG.fullmatch(ref) or SHA.fullmatch(ref)) or 'tag_pattern' in git:
+                      errors.append(f'{path}: {name} uses moving/unsupported ref {ref!r}; use an exact version tag or full commit SHA')
+                  if path.endswith('.lock') and not SHA.fullmatch(str(git.get('resolved-ref', ''))):
+                      errors.append(f'{path}: {name} needs a full resolved commit SHA')
+              return errors
+          
+          
+          def main():
+              paths = subprocess.check_output(['git', 'ls-files', '-z'], text=True).split('\0')
+              errors = []
+              for path in paths:
+                  if Path(path).name not in ('pubspec.yaml', 'pubspec_overrides.yaml', 'pubspec.lock') or not Path(path).is_file():
+                      continue
+                  try:
+                      errors.extend(check_document(path, yaml.safe_load(Path(path).read_text())))
+                  except (ValueError, yaml.YAMLError, AttributeError) as error:
+                      errors.append(f'{path}: invalid dependency document: {error}')
+              if errors:
+                  print('\n'.join(errors), file=sys.stderr)
+                  return 1
+              print('Git dependencies use explicit version tags or full commit SHAs.')
+              return 0
+          
+          
+          if __name__ == '__main__':
+              sys.exit(main())
+          PY
